@@ -1,0 +1,128 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [master, main]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    name: Review & Comment
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch PR diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr diff ${{ github.event.pull_request.number }} > pr.diff
+
+      - name: Build review comment
+        # Posts a Claude AI review when ANTHROPIC_API_KEY is configured as a
+        # repository secret; falls back to a structured diff summary otherwise.
+        # Either way the comment triggers a GitHub notification email to watchers.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE:  ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BASE:   ${{ github.event.pull_request.base.ref }}
+          PR_HEAD:   ${{ github.event.pull_request.head.ref }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, json, re, urllib.request
+
+          diff = open('pr.diff').read()
+
+          # ── Stats always computed ──────────────────────────────────────────
+          added   = sum(1 for l in diff.splitlines() if l.startswith('+') and not l.startswith('+++'))
+          removed = sum(1 for l in diff.splitlines() if l.startswith('-') and not l.startswith('---'))
+          files   = re.findall(r'^diff --git a/.+ b/(.+)$', diff, re.MULTILINE)
+
+          stats = (
+              f"**{len(files)} file(s) changed** · "
+              f"**+{added}** additions · "
+              f"**-{removed}** deletions\n\n"
+              + "\n".join(f"- `{f}`" for f in files)
+          )
+
+          pr_header = (
+              f"**PR #{os.environ['PR_NUMBER']}:** {os.environ['PR_TITLE']}  \n"
+              f"**Author:** {os.environ['PR_AUTHOR']}  \n"
+              f"**Branch:** `{os.environ['PR_HEAD']}` → `{os.environ['PR_BASE']}`"
+          )
+
+          commands = (
+              "\n\n---\n"
+              "*Commands: `/claude approve` · `/claude merge` · `/claude resolve`*"
+          )
+
+          api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+
+          if api_key:
+              prompt = f"""You are reviewing a pull request for the room-digital-twin project
+(Docker Compose stack: Mosquitto MQTT · InfluxDB 2.7 · Grafana 10.4 · Python simulator · Three.js 3D viz).
+
+{pr_header}
+
+{stats}
+
+Diff (truncated to 12 000 chars):
+{diff[:12000]}
+
+Write a structured review with exactly these sections:
+
+## Summary
+2–3 sentences describing what this PR does.
+
+## Key changes
+Bullet list of the most important modifications.
+
+## Concerns
+Issues, risks, or things to double-check. Write "None" if the PR looks clean.
+
+## Recommendation
+Exactly one of: ✅ APPROVE | ⚠️ REQUEST CHANGES | 💬 NEEDS DISCUSSION
+Followed by one sentence explaining your recommendation."""
+
+              req = urllib.request.Request(
+                  'https://api.anthropic.com/v1/messages',
+                  data=json.dumps({
+                      'model': 'claude-sonnet-4-6',
+                      'max_tokens': 1024,
+                      'messages': [{'role': 'user', 'content': prompt}],
+                  }).encode(),
+                  headers={
+                      'x-api-key': api_key,
+                      'anthropic-version': '2023-06-01',
+                      'content-type': 'application/json',
+                  },
+              )
+              with urllib.request.urlopen(req) as resp:
+                  review = json.load(resp)['content'][0]['text']
+
+              comment = f"## Claude AI Review\n\n{pr_header}\n\n{stats}\n\n---\n\n{review}{commands}"
+
+          else:
+              diff_excerpt = "\n".join(diff.splitlines()[:80])
+              comment = (
+                  f"## PR Summary\n\n{pr_header}\n\n{stats}\n\n"
+                  f"<details>\n<summary>Diff excerpt</summary>\n\n"
+                  f"```diff\n{diff_excerpt}\n```\n\n</details>"
+                  f"{commands}"
+              )
+
+          open('comment.txt', 'w').write(comment)
+          PYEOF
+
+      - name: Post comment on PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body "$(cat comment.txt)"

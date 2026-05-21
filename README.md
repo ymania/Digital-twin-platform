@@ -315,10 +315,18 @@ Mosquitto must be running and port 1883 must be reachable from the host. Run `do
 
 ---
 
+## Contributing
+
+All contributions go through pull requests — direct pushes to `master` are not allowed.
+
+1. Fork the repo and create a feature branch from `master`
+2. Make your changes and commit with a clear message
+3. Open a pull request — CI will run automatically
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and a PR checklist.
+
+---
+
 ## Licence
 
 [MIT](LICENSE) — free to use, modify, and redistribute with attribution.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add sensors, panels, or features.
