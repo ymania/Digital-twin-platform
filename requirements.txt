@@ -1,0 +1,2 @@
+# Dependencies for control.py (run on the host, outside Docker)
+paho-mqtt==1.6.1
