@@ -1,12 +1,9 @@
 name: PR Commands
 
-# Slash commands available by commenting on any PR (repo owner only):
-#
-#   /claude approve   — submit a GitHub approval review
-#   /claude merge     — approve then squash-merge the PR
-#   /claude resolve   — resolve merge conflicts with Claude and push
-#
-# Results are posted as PR comments; GitHub emails them to watchers automatically.
+# Slash commands — comment on a PR (repo owner only):
+#   /claude approve   submit a GitHub approval review
+#   /claude merge     approve then squash-merge
+#   /claude resolve   resolve merge conflicts with Claude and push
 
 on:
   issue_comment:
@@ -18,26 +15,17 @@ permissions:
 
 jobs:
   handle:
-    if: |
-      github.event.issue.pull_request != null &&
-      github.event.comment.user.login == github.repository_owner &&
-      (
-        contains(github.event.comment.body, '/claude approve') ||
-        contains(github.event.comment.body, '/claude merge')   ||
-        contains(github.event.comment.body, '/claude resolve')
-      )
+    if: github.event.issue.pull_request != null && github.event.comment.user.login == github.repository_owner && (contains(github.event.comment.body, '/claude approve') || contains(github.event.comment.body, '/claude merge') || contains(github.event.comment.body, '/claude resolve'))
     runs-on: ubuntu-latest
 
     steps:
-      # Acknowledge with 👀 so the owner knows the command was received
-      - name: Acknowledge command
+      - name: Acknowledge command (👀)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions \
             --method POST -f content=eyes
 
-      # ── Parse command ───────────────────────────────────────────────────────
       - name: Determine action
         id: cmd
         run: |
@@ -47,7 +35,6 @@ jobs:
           elif [[ "$BODY" == *"/claude resolve"* ]]; then echo "action=resolve" >> $GITHUB_OUTPUT
           fi
 
-      # ── Fetch PR metadata ───────────────────────────────────────────────────
       - name: Get PR details
         id: pr
         env:
@@ -55,14 +42,12 @@ jobs:
         run: |
           DATA=$(gh pr view ${{ github.event.issue.number }} \
             --repo ${{ github.repository }} \
-            --json number,title,headRefName,baseRefName,url)
+            --json number,title,headRefName,baseRefName)
           echo "number=$(echo "$DATA" | python3 -c "import sys,json; print(json.load(sys.stdin)['number'])")"      >> $GITHUB_OUTPUT
           echo "head=$(echo   "$DATA" | python3 -c "import sys,json; print(json.load(sys.stdin)['headRefName'])")" >> $GITHUB_OUTPUT
           echo "base=$(echo   "$DATA" | python3 -c "import sys,json; print(json.load(sys.stdin)['baseRefName'])")" >> $GITHUB_OUTPUT
 
-      # ════════════════════════════════════════════════════════════════════════
-      # /claude approve  &  /claude merge
-      # ════════════════════════════════════════════════════════════════════════
+      # ── /claude approve & /claude merge ──────────────────────────────────────
 
       - name: Submit GitHub approval
         if: steps.cmd.outputs.action == 'approve' || steps.cmd.outputs.action == 'merge'
@@ -72,7 +57,7 @@ jobs:
           gh api repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}/reviews \
             --method POST \
             -f event=APPROVE \
-            -f body="Approved via \`/claude ${{ steps.cmd.outputs.action }}\`."
+            -f body="Approved via /claude ${{ steps.cmd.outputs.action }}."
 
       - name: Squash-merge PR
         if: steps.cmd.outputs.action == 'merge'
@@ -84,9 +69,7 @@ jobs:
             --squash \
             --delete-branch
 
-      # ════════════════════════════════════════════════════════════════════════
-      # /claude resolve  — checkout PR branch, merge base, fix conflicts
-      # ════════════════════════════════════════════════════════════════════════
+      # ── /claude resolve ───────────────────────────────────────────────────────
 
       - name: Checkout repository
         if: steps.cmd.outputs.action == 'resolve'
@@ -116,93 +99,46 @@ jobs:
 
           if git merge "origin/$BASE_BRANCH" --no-edit; then
             echo "result=clean" >> $GITHUB_OUTPUT
+          elif [[ -z "$ANTHROPIC_API_KEY" ]]; then
+            git merge --abort
+            echo "result=no_key" >> $GITHUB_OUTPUT
           else
-            # Require API key for conflict resolution
-            if [[ -z "$ANTHROPIC_API_KEY" ]]; then
-              echo "result=no_key" >> $GITHUB_OUTPUT
-              git merge --abort
-              exit 0
-            fi
-
-            python3 - <<'PYEOF'
-          import os, json, urllib.request, subprocess
-
-          conflicted = subprocess.run(
-              ['git', 'diff', '--name-only', '--diff-filter=U'],
-              capture_output=True, text=True
-          ).stdout.strip().split('\n')
-          conflicted = [f for f in conflicted if f]
-
-          resolved = []
-          for filepath in conflicted:
-              raw = open(filepath).read()
-              prompt = f"""Resolve all Git conflict markers in this file from the room-digital-twin project.
-          Return ONLY the complete resolved file content — no explanations, no markdown fences.
-
-          File: {filepath}
-
-          {raw}"""
-              req = urllib.request.Request(
-                  'https://api.anthropic.com/v1/messages',
-                  data=json.dumps({
-                      'model': 'claude-sonnet-4-6',
-                      'max_tokens': 4096,
-                      'messages': [{'role': 'user', 'content': prompt}],
-                  }).encode(),
-                  headers={
-                      'x-api-key': os.environ['ANTHROPIC_API_KEY'],
-                      'anthropic-version': '2023-06-01',
-                      'content-type': 'application/json',
-                  },
-              )
-              with urllib.request.urlopen(req) as resp:
-                  open(filepath, 'w').write(json.load(resp)['content'][0]['text'])
-              resolved.append(filepath)
-
-          open('resolved.txt', 'w').write('\n'.join(resolved))
-          PYEOF
-
+            python3 .github/scripts/pr_resolve.py
             git add .
             git commit -m "resolve: merge conflicts with $BASE_BRANCH (via /claude resolve)"
             git push origin "$HEAD_BRANCH"
             echo "result=resolved" >> $GITHUB_OUTPUT
           fi
 
-      # ════════════════════════════════════════════════════════════════════════
-      # Post result comment (GitHub emails it to watchers automatically)
-      # ════════════════════════════════════════════════════════════════════════
+      # ── Post result comment ───────────────────────────────────────────────────
 
       - name: Post result comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ACTION="${{ steps.cmd.outputs.action }}"
           PR="${{ steps.pr.outputs.number }}"
-
-          case "$ACTION" in
+          case "${{ steps.cmd.outputs.action }}" in
             approve)
-              MSG="✅ PR approved via \`/claude approve\`." ;;
+              MSG="Approved via \`/claude approve\`." ;;
             merge)
-              MSG="✅ PR approved and squash-merged via \`/claude merge\`. Branch deleted." ;;
+              MSG="Approved and squash-merged via \`/claude merge\`. Branch deleted." ;;
             resolve)
               case "${{ steps.resolve.outputs.result }}" in
                 clean)
-                  MSG="✅ No conflicts — branch merges cleanly into \`${{ steps.pr.outputs.base }}\`." ;;
+                  MSG="No conflicts — branch merges cleanly into \`${{ steps.pr.outputs.base }}\`." ;;
                 no_key)
-                  MSG="⚠️ \`/claude resolve\` requires \`ANTHROPIC_API_KEY\` to be set as a repository secret." ;;
+                  MSG="\`/claude resolve\` requires \`ANTHROPIC_API_KEY\` to be set as a repository secret." ;;
                 resolved)
                   FILES=$(sed 's/^/- /' resolved.txt 2>/dev/null || echo "- (see diff)")
-                  MSG="🔧 Conflicts resolved and pushed to \`${{ steps.pr.outputs.head }}\`.
+                  MSG="Conflicts resolved and pushed to \`${{ steps.pr.outputs.head }}\`.
 
           **Files resolved:**
           ${FILES}" ;;
               esac ;;
           esac
-
           gh pr comment "$PR" --body "$MSG"
 
-      # Mark command done with ✅
-      - name: Mark command done
+      - name: Mark command done (✅)
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
