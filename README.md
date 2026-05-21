@@ -1,5 +1,7 @@
 # Room Digital Twin
 
+[![CI](https://github.com/muhammadazam/room-digital-twin/actions/workflows/ci.yml/badge.svg)](https://github.com/muhammadazam/room-digital-twin/actions/workflows/ci.yml)
+
 A minimal but end-to-end **digital twin** of a smart room. A Python simulator mimics physical IoT sensors (temperature, humidity, fan, light, power) and publishes readings over MQTT every 5 seconds. A bridge persists those readings to InfluxDB. Grafana renders live dashboards. A Three.js app renders the room in 3D and animates it in real time. Fan speed can be controlled remotely through the twin.
 
 ```
