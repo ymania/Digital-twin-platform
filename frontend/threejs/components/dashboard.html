@@ -1,0 +1,113 @@
+<!--
+  dashboard.html — 仪表盘面板（内嵌 iframe 或侧边栏）
+  显示资产列表、当前值、状态、时间戳。
+  由 index.html 通过 iframe 或 side panel 加载。
+-->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; }
+  body {
+    background: rgba(10, 14, 23, 0.92);
+    backdrop-filter: blur(8px);
+    color: #e0e5f0;
+    padding: 16px;
+    font-size: 12px;
+    width: 300px;
+    height: 100vh;
+    overflow-y: auto;
+    border-left: 1px solid rgba(255,255,255,0.06);
+  }
+  .panel-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: rgba(255,255,255,0.3);
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .asset-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    background: rgba(255,255,255,0.03);
+    transition: background 0.3s;
+  }
+  .asset-row:hover { background: rgba(255,255,255,0.06); }
+  .asset-row .name { font-family: monospace; font-size: 11px; color: rgba(255,255,255,0.7); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .asset-row .value { font-weight: 600; font-size: 13px; }
+  .asset-row .status-badge {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    flex-shrink: 0;
+  }
+  .status-Normal { color: #4ade80; --dot-color: #4ade80; }
+  .status-Warning { color: #facc15; --dot-color: #facc15; }
+  .status-Critical, .status-Alarm { color: #ef4444; --dot-color: #ef4444; }
+  .status-Maintenance { color: #f97316; --dot-color: #f97316; }
+  .status-Offline { color: #6b7280; --dot-color: #6b7280; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot-color, #6b7280); flex-shrink: 0; }
+  .empty { color: rgba(255,255,255,0.25); text-align: center; padding: 40px 0; }
+</style>
+
+<div class="panel-title">资产状态列表</div>
+<div id="asset-list">
+  <div class="empty">等待 WebSocket 连接…</div>
+</div>
+
+<script>
+  // 通过 postMessage 与父窗口通信
+  window.addEventListener('message', (evt) => {
+    if (evt.origin !== window.location.origin) return;
+    const msg = evt.data;
+    if (msg.type === 'SNAPSHOT') {
+      renderSnapshot(msg.data);
+    } else if (msg.type === 'INCREMENT') {
+      updateRow(msg.data);
+    }
+  });
+
+  function renderSnapshot(data) {
+    const list = document.getElementById('asset-list');
+    if (!data || Object.keys(data).length === 0) {
+      list.innerHTML = '<div class="empty">暂无资产数据</div>';
+      return;
+    }
+    list.innerHTML = Object.entries(data)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([guid, d]) => assetRowHTML(guid, d))
+      .join('');
+  }
+
+  function updateRow(data) {
+    const guid = data.guid || data.asset_id;
+    const row = document.getElementById(`row-${guid}`);
+    if (row) {
+      row.outerHTML = assetRowHTML(guid, data);
+    } else {
+      // 新资产出现，追加
+      const list = document.getElementById('asset-list');
+      list.insertAdjacentHTML('afterbegin', assetRowHTML(guid, data));
+    }
+  }
+
+  function assetRowHTML(guid, d) {
+    const status = d.status || 'Normal';
+    const val = d.value != null ? d.value.toFixed(1) : '-';
+    const metric = d.metric || '';
+    const ts = d.timestamp
+      ? new Date(d.timestamp).toLocaleTimeString()
+      : '';
+    return `<div class="asset-row" id="row-${guid}">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <span class="dot" style="background:var(--dot-color, #6b7280);"></span>
+        <span class="name" title="${guid}">${guid.length > 18 ? guid.slice(0, 16) + '…' : guid}</span>
+      </div>
+      <span class="value status-${status}">${val} ${metric}</span>
+    </div>`;
+  }
+</script>

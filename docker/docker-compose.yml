@@ -1,0 +1,161 @@
+version: "3.8"
+
+x-common: &common
+  restart: unless-stopped
+  networks:
+    - dt-network
+
+services:
+
+  # ============================================================
+  # Message Layer
+  # ============================================================
+  emqx:
+    image: emqx:5.8
+    <<: *common
+    container_name: dt-emqx
+    hostname: dt-emqx
+    ports:
+      - "1884:1883"    # MQTT TCP (宿主机1884→容器1883)
+      - "8084:8083"    # MQTT WS (宿主机8084→容器8083)
+      - "18084:18083"  # Dashboard
+    environment:
+      EMQX_NODE__NAME: emqx@127.0.0.1
+      EMQX_MQTT__MAX_TOPIC_ALIAS: 100
+    volumes:
+      - emqx-data:/opt/emqx/data
+    healthcheck:
+      test: ["CMD", "emqx", "ping"]
+      interval: 10s
+      retries: 5
+
+  # ============================================================
+  # Edge Layer — Python 轻量采集器（替换 Node-RED）
+  # ============================================================
+  edge:
+    build:
+      context: ../edge/python-collector
+      dockerfile: Dockerfile
+      args:
+        http_proxy: ""
+        https_proxy: ""
+        HTTP_PROXY: ""
+        HTTPS_PROXY: ""
+    <<: *common
+    container_name: dt-edge
+    environment:
+      MQTT_HOST: emqx
+      MQTT_PORT: "1883"
+      MODBUS_HOST: simulator
+      MODBUS_PORT: "5020"
+      CACHE_DB_PATH: /data/edge_cache.db
+    volumes:
+      - edge-cache:/data
+    depends_on:
+      emqx:
+        condition: service_healthy
+      simulator:
+        condition: service_started
+
+  # ============================================================
+  # Data Layer
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    <<: *common
+    container_name: dt-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: dt_platform
+      POSTGRES_USER: dt_user
+      POSTGRES_PASSWORD: dt_pass_2025
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../database/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dt_user -d dt_platform"]
+      interval: 5s
+      retries: 5
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    <<: *common
+    container_name: dt-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: influx_pass_2025
+      DOCKER_INFLUXDB_INIT_ORG: dt_platform
+      DOCKER_INFLUXDB_INIT_BUCKET: telemetry
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: dt_influx_token_2025
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+
+  # ============================================================
+  # Twin Layer
+  # ============================================================
+  backend:
+    build:
+      context: ../backend/FastAPI
+      dockerfile: Dockerfile
+      args:
+        http_proxy: ""
+        https_proxy: ""
+        HTTP_PROXY: ""
+        HTTPS_PROXY: ""
+    <<: *common
+    container_name: dt-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../frontend/threejs/viewer:/app/viewer
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: dt_platform
+      POSTGRES_USER: dt_user
+      POSTGRES_PASSWORD: dt_pass_2025
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: dt_influx_token_2025
+      INFLUXDB_ORG: dt_platform
+      INFLUXDB_BUCKET: telemetry
+      MQTT_HOST: emqx
+      MQTT_PORT: 1883
+    depends_on:
+      postgres:
+        condition: service_healthy
+      influxdb:
+        condition: service_started
+      emqx:
+        condition: service_healthy
+
+  # ============================================================
+  # Simulation Layer
+  # ============================================================
+  simulator:
+    build:
+      context: ../simulation/modbus
+      dockerfile: Dockerfile
+      args:
+        http_proxy: ""
+        https_proxy: ""
+        HTTP_PROXY: ""
+        HTTPS_PROXY: ""
+    <<: *common
+    container_name: dt-simulator
+    ports:
+      - "5020:5020"
+
+networks:
+  dt-network:
+    name: dt-network
+    driver: bridge
+
+volumes:
+  emqx-data:
+  postgres-data:
+  influxdb-data:
+  edge-cache:
