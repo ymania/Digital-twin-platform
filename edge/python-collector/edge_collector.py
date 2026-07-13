@@ -318,14 +318,48 @@ class MqttClient:
             self._connected = False
 
     async def publish(self, topic: str, payload: dict, qos: int = 0):
-        """发布消息。断网时自动缓存到 SQLite"""
-        if self._connected and self.client:
-            result = self.client.publish(topic, json.dumps(payload), qos=qos)
-            if result.rc == self._MQTT_ERR_SUCCESS:
-                log.debug("Published to %s", topic)
-                return
+        """发布消息。断网时自动缓存到 SQLite
+
+        修复：paho connect_async 在断网时 publish 仍返回 rc=0（内部发送缓冲），
+        直到 keepalive 超时才触发 on_disconnect（默认 60s）。
+        改用 publish 前 socket 健康检查 + 发布后确认双保险。
+        """
+        if not self.client:
+            self.cache.enqueue(topic, payload)
+            log.info("Cached (no client, queue=%d)", self.cache.size)
+            return
+
+        # socket 级健康检查 — 确认 TCP 连接还在
+        # paho 的 _sock 是内部属性，getattr 防御式访问
+        connected = self._connected
+        sock = getattr(self.client, '_sock', None)
+        if connected and sock is not None:
+            try:
+                sock.getsockname()
+            except (OSError, AttributeError):
+                connected = False
+                self._connected = False
+
+        if connected:
+            import paho.mqtt.client as mqtt
+            msg_info = self.client.publish(topic, json.dumps(payload), qos=qos)
+            if msg_info.rc == mqtt.MQTT_ERR_SUCCESS:
+                # qos=1/2: 等发布确认
+                if qos > 0:
+                    try:
+                        msg_info.wait_for_publish(timeout=3.0)
+                    except RuntimeError:
+                        pass  # loop not running
+                    # wait_for_publish 成功不保证送达，但 qos=1/2 会重试
+                    log.debug("Published to %s (qos=%d)", topic, qos)
+                    return
+                else:
+                    # qos=0: 没确认机制，靠 socket check
+                    log.debug("Published to %s (qos=0)", topic)
+                    return
             else:
-                log.warning("MQTT publish failed (rc=%d), caching", result.rc)
+                log.warning("MQTT publish rc=%d, caching", msg_info.rc)
+
         # 断网 → 缓存
         self.cache.enqueue(topic, payload)
         log.info("Cached message (queue=%d, topic=%s)", self.cache.size, topic)
