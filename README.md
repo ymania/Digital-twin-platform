@@ -1,98 +1,75 @@
-# Digital Twin Platform — 工业数字孪生平台
-
-## 架构概览
-
-**两套独立栈，共享网络，各司其职。**
+# Digital Twin Platform
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ Docker network: digital-twin_default                         │
-│                                                              │
-│  ┌─ 底座 (room-digital-twin) ───────────────────────────┐   │
-│  │  sensor_simulator → mosquitto (MQTT) → mqtt_bridge    │   │
-│  │                            ↓              ↓           │   │
-│  │                         viz3d         influxdb         │   │
-│  │                                         ↓              │   │
-│  │                                      grafana           │   │
-│  └────────────────────────────────────────────────────────┘   │
-│                           │ MQTT  1883                        │
-│                           ▼                                   │
-│  ┌─ 扩展层 (BIM + Twin Service) ─────────────────────────┐   │
-│  │  FastAPI (Twin Service) ← 订阅 MQTT 数据               │   │
-│  │     ├── PostgreSQL（资产/传感器/告警规则）               │   │
-│  │     └── WebSocket → Three.js (BIM 3D 渲染)             │   │
-│  └────────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────┘
+docker compose -f docker/docker-compose.yml up -d
 ```
 
-### 底座层
+一键启动 6 个容器的工业数字孪生平台。物理仿真 → MQTT → InfluxDB + PostgreSQL → WebSocket → Three.js 3D 渲染。
 
-| 组件 | 技术栈 | 端口 | 职责 |
-|------|--------|------|------|
-| sensor_simulator | Python + paho-mqtt | — | 物理模型仿真（温度/湿度/风扇/光照/功率） |
-| mosquitto | eclipse-mosquitto:2 | 1883, 9001 | MQTT Broker（TCP + WebSocket） |
-| mqtt_bridge | Python + influxdb-client | — | MQTT → InfluxDB 持久化 |
-| influxdb | influxdb:2.7 | 8086 | 时序数据库 |
-| grafana | grafana/grafana:10.4 | 3000 | 可视化面板 |
-| viz3d | nginx:alpine | 8080 | Three.js 3D 房间可视化 |
+## 栈
 
-### 扩展层
+| 容器 | 镜像 | 端口 | 职责 |
+|------|------|------|------|
+| emqx | emqx:5.8 | 1883(MQTT) 18083(Dashboard) | 消息层 Broker |
+| simulator | python:3.11-slim | — | Modbus 寄存器仿真+边缘采集 |
+| bridge | python:3.11-slim | — | MQTT→InfluxDB 桥接持久化 |
+| influxdb | influxdb:2.7-alpine | 8086 | 时序数据库 |
+| postgres | postgres:16-alpine | 5433 | 资产/传感器关系库 |
+| backend | python:3.12-slim | 8000 | Twin Service + WebSocket + Three.js viewer |
 
-| 组件 | 技术栈 | 端口 | 职责 |
-|------|--------|------|------|
-| FastAPI | Python + FastAPI | 8000 | Twin Service（状态机 + WebSocket + REST API） |
-| Three.js Viewer | Three.js + CSS2DRenderer | 8000 | BIM 模型 3D 渲染 + 实时状态推送 |
-| PostgreSQL | postgres:16-alpine | 5433 | 资产/传感器/告警规则关系存储 |
-
-## 快速启动
-
-### 1. 启动底座
-
-```bash
-cd room-digital-twin
-cp .env.example .env
-docker compose up -d
-```
-
-### 2. 启动扩展层
+## 启动
 
 ```bash
 cd project
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-## 数据流
+首次启动自动 build 两个 Python 镜像，约 60s。之后秒启。
+
+## 访问
+
+| 地址 | 说明 |
+|------|------|
+| http://localhost:8000 | Three.js 3D 前端（BIM 模型 + 实时状态） |
+| http://localhost:18083 | EMQX Dashboard（admin / emqx_pass_2025） |
+| http://localhost:8086 | InfluxDB UI |
+| localhost:1883 | MQTT TCP |
+
+## 架构
 
 ```
-传感器仿真 → MQTT (room/temperature, room/humidity, ...)
-    ↓
-mqtt_bridge → InfluxDB（时序存储）
-    ↓
-FastAPI (mqtt_consumer) → 状态机矩阵 → WebSocket → Three.js 前端
-    ↓
-PostgreSQL（资产资产映射 bim_guid ↔ asset_id）
+Modbus 仿真 → 边缘采集(滑动窗口+断网缓存) → EMQX(mqtt)
+                                                  ↓            ─→ WebSocket → Three.js
+bridge(mqtt→influxdb)   backend(状态机+pg查询) ─→ 
+     ↓                                                
+InfluxDB(时序)      PostgreSQL(资产映射)
 ```
 
-## MQTT Topic 规范
+## 数据通路验证
 
-| Topic | 方向 | Payload | 说明 |
-|-------|------|---------|------|
-| `room/temperature` | simulator → broker | `{"value": 23.5}` | 温度 °C |
-| `room/humidity` | simulator → broker | `{"value": 58.4}` | 湿度 % |
-| `room/fan_state` | simulator → broker | `{"value": "ON"}` | 风扇状态 |
-| `room/fan_speed` | simulator → broker | `{"value": 1198}` | 风扇转速 RPM |
-| `room/light` | simulator → broker | `{"value": 412.0}` | 光照 lux |
-| `room/power` | simulator → broker | `{"value": 85.3}` | 功率 W |
-| `room/fan/control` | host → broker → simulator | `ON` / `OFF` | 风扇远程控制 |
+```bash
+# MQTT 数据流
+pip install paho-mqtt
+python3 -c "
+import paho.mqtt.client as mqtt, time
+got=[]
+def on_msg(c,u,m): got.append(m.topic)
+c=mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+c.on_message=on_msg; c.connect('localhost',1883,60); c.subscribe('#')
+c.loop_start(); time.sleep(8); c.loop_stop()
+for t in set(got): print(t)
+"
 
-## 架构决策记录
+# REST API
+curl localhost:8000/api/health
+```
 
-详见 `Architecture.md`（ADR 格式）。
+## 文件
 
-## AI 约束
+- `AGENTS.md` — AI 行为红线
+- `Architecture.md` — ADR 架构记录
+- `ROADMAP.md` — 演进路线
 
-详见 `AGENTS.md`（AI 行为锚定规范、高压红线、输出格式审计）。
+## 缺什么
 
-## ROADMAP
-
-详见 `ROADMAP.md`（Phase 1-4 演进路线图）。
+半成品。缺真实时序数据通路的端到端跑通验证。容器全健康，MQTT/Bridge/InfluxDB/PostgreSQL/Backend 代码全在，但实际数据通路因环境网络问题未完全打通。有真实 MQTT 源或修复 daemon 代理即可跑满全栈。
