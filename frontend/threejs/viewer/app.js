@@ -63,6 +63,9 @@ loadIFC(scene).then(gm => {
     applyState(guid, status, value);
   }
   updateHUD();
+}).catch(err => {
+  console.error('IFC LOAD FAILED:', err.message);
+  document.getElementById('conn-label').textContent = 'IFC ERR: ' + err.message;
 });
 
 // ── Asset labels ─────────────────────────
@@ -85,11 +88,16 @@ function applyState(guid, status, value) {
     return;
   }
   const color = STATUS_COLORS[status] || 0x4ade80;
-  setMeshColor(guidMap, guid, color);
+  const ok = setMeshColor(guidMap, guid, color);
+  if (!ok) {
+    console.warn('FALLBACK: no mesh for', guid);
+    // NO box creation — just log
+  }
 
   if (!assetLabels.has(guid)) {
-    const label = createLabel(guid.length > 20 ? guid.slice(0, 18) + '…' : guid);
     const mesh = guidMap.get(guid);
+    if (!mesh) return;  // no IFC mesh for this guid, skip label too
+    const label = createLabel(guid.length > 20 ? guid.slice(0, 18) + '…' : guid);
     if (mesh) {
       label.position.copy(mesh.position);
       const bb = new THREE.Box3().setFromObject(mesh);

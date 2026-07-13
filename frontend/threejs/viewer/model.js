@@ -20,7 +20,9 @@ const IFC_COLORS = {
 
 export async function loadIFC(scene, url = './ifc.json') {
   const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`fetch ifc.json: ${resp.status}`);
   const data = await resp.json();
+  if (!data.meshes || !data.meshes.length) throw new Error('empty meshes');
 
   const guidMap = new Map();
 
@@ -66,8 +68,9 @@ export async function loadIFC(scene, url = './ifc.json') {
 
 export function setMeshColor(guidMap, guid, color) {
   const mesh = guidMap.get(guid);
-  if (!mesh) return false;
+  if (!mesh) { console.warn('mesh not found:', guid); return false; }
   mesh.material.color.setHex(color);
+  mesh.visible = true;
   if (color !== 0x4ade80) {
     mesh.material.emissive.setHex(color);
     mesh.material.emissiveIntensity = 0.2;
@@ -75,5 +78,6 @@ export function setMeshColor(guidMap, guid, color) {
     mesh.material.emissive.setHex(0x000000);
     mesh.material.emissiveIntensity = 0;
   }
+  mesh.material.needsUpdate = true;
   return true;
 }

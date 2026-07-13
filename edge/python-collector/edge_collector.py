@@ -37,7 +37,7 @@ REGISTER_MAP = {
     5:  ("wall_left",  "temperature", "℃",   26.0, 5.0,  32),
     6:  ("wall_plumbing",    "temperature", "℃",   22.0, 2.5,  20),
     7:  ("wall_plumbing",    "humidity",    "%",   60.0, 10.0, 38),
-    8:  ("roof_left",  "temperature", "℃",   38.0, 8.0,  25),
+    8:  ("roof_left",  "temperature", "℃",   45.0, 8.0,  25),
     9:  ("roof_right", "temperature", "℃",   36.0, 6.0,  28),
     10: ("kitchen",    "temperature", "℃",   24.0, 3.0,  35),
     11: ("kitchen",    "power",       "kW",  2.5,  1.5,  60),
