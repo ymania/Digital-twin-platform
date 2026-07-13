@@ -29,16 +29,21 @@ from typing import Optional
 TELEMETRY_TOPIC = "industrial_twin/edge_node_01/telemetry/data"
 # 寄存器映射: register_offset -> (asset_id, metric_name, unit, base, amplitude, period)
 REGISTER_MAP = {
-    0:  ("rack_001", "temperature", "℃",   30.0, 5.0,  30),
-    1:  ("rack_001", "humidity",    "%",   55.0, 15.0, 40),
-    2:  ("rack_002", "temperature", "℃",   28.0, 4.0,  25),
-    3:  ("rack_002", "humidity",    "%",   50.0, 10.0, 35),
-    4:  ("rack_003", "temperature", "℃",   32.0, 6.0,  28),
-    5:  ("rack_003", "humidity",    "%",   45.0, 20.0, 45),
-    6:  ("rack_004", "temperature", "℃",   26.0, 5.0,  32),
-    7:  ("rack_004", "humidity",    "%",   60.0, 10.0, 38),
-    8:  ("ac_001",   "temperature", "℃",   22.0, 2.5,  20),
-    9:  ("ac_001",   "power",       "kW",  3.0,  2.0,  60),
+    0:  ("floor",      "temperature", "℃",   30.0, 5.0,  30),
+    1:  ("floor",      "humidity",    "%",   55.0, 15.0, 40),
+    2:  ("wall_right_front", "temperature", "℃",   28.0, 4.0,  25),
+    3:  ("wall_right_front", "humidity",    "%",   50.0, 10.0, 35),
+    4:  ("wall_right_back",  "temperature", "℃",   32.0, 6.0,  28),
+    5:  ("wall_left",  "temperature", "℃",   26.0, 5.0,  32),
+    6:  ("wall_plumbing",    "temperature", "℃",   22.0, 2.5,  20),
+    7:  ("wall_plumbing",    "humidity",    "%",   60.0, 10.0, 38),
+    8:  ("roof_left",  "temperature", "℃",   38.0, 8.0,  25),
+    9:  ("roof_right", "temperature", "℃",   36.0, 6.0,  28),
+    10: ("kitchen",    "temperature", "℃",   24.0, 3.0,  35),
+    11: ("kitchen",    "power",       "kW",  2.5,  1.5,  60),
+    12: ("living_room","temperature", "℃",   25.0, 2.0,  30),
+    13: ("living_room","humidity",    "%",   50.0, 10.0, 40),
+    14: ("entry_hall", "temperature", "℃",   23.0, 3.0,  35),
 }
 
 # 告警阈值（10秒滑动窗口均值）

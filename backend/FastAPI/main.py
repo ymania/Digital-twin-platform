@@ -22,6 +22,13 @@ logger = logging.getLogger("dt")
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Digital Twin Backend starting...")
+    from database import get_pool
+    try:
+        pool = await get_pool()
+        logger.info("PostgreSQL connection pool initialized")
+    except Exception as e:
+        logger.warning("PostgreSQL pool init failed: %s", e)
+
     from services.mqtt_consumer import start_mqtt
     mqtt_task = None
     try:

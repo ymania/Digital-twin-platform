@@ -7,10 +7,10 @@
 CREATE TABLE IF NOT EXISTS asset (
     asset_id    SERIAL PRIMARY KEY,
     asset_name  VARCHAR(128) NOT NULL,
-    asset_type  VARCHAR(32)  NOT NULL,  -- cabinet, ac, ups, pdu, sensor
+    asset_type  VARCHAR(32)  NOT NULL,  -- cabinet, wall, floor, roof, space, sensor
     room        VARCHAR(64),
     floor       INTEGER,
-    bim_guid    VARCHAR(64)  UNIQUE,    -- IFC GUID
+    bim_guid    VARCHAR(64)  UNIQUE,    -- IFC GlobalId
     parent_id   INTEGER      REFERENCES asset(asset_id),
     metadata    JSONB,
     created_at  TIMESTAMPTZ  DEFAULT NOW(),
@@ -89,93 +89,64 @@ CREATE INDEX idx_asset_bim_guid ON asset(bim_guid);
 CREATE INDEX idx_asset_parent ON asset(parent_id);
 
 -- ============================================================
--- Seed Data: 机房 + 设备 + 传感器
+-- Seed Data: IFC 建筑资产 + 传感器
 -- ============================================================
 
 -- 机房
 INSERT INTO room (room_name, floor, grid_x, grid_y) VALUES
-    ('Main Server Room', 1, 4, 5);
+    ('Main Room', 1, 4, 5);
 
--- 资产（机柜）
+-- 资产（从 IFC 模型 Building-Architecture.ifc 提取）
 INSERT INTO asset (asset_name, asset_type, room, floor, bim_guid) VALUES
-    ('RACK-001', 'cabinet', 'Main Server Room', 1, '3XW2b$f5T9BQ7j1'),
-    ('RACK-002', 'cabinet', 'Main Server Room', 1, '4Yx3c$g6U0CR8k2'),
-    ('RACK-003', 'cabinet', 'Main Server Room', 1, '5Zy4d$h7V1DS9l3'),
-    ('RACK-004', 'cabinet', 'Main Server Room', 1, '6Az5e$i8W2ET0m4');
+    ('floor',          'slab',  'Main Room', 1, '3zR0BOEcLADRKln4HYporH'),
+    ('wall_right_front','wall', 'Main Room', 1, '1AQAupaRP1txwK1AGiN61V'),
+    ('wall_right_back', 'wall', 'Main Room', 1, '3wdauVJT5Fx9drrREiDqA$'),
+    ('wall_left',      'wall',  'Main Room', 1, '0OfZwWc8j9QP5uX8xPTxDH'),
+    ('wall_plumbing',  'wall',  'Main Room', 1, '1uS5vfZPn9R8PlAaVd73on'),
+    ('roof_left',      'roof',  'Main Room', 2, '0ZTBBPo6f6bxqV2K7Oelrq'),
+    ('roof_right',     'roof',  'Main Room', 2, '12UVOn4wvAJPMUExKdZLb8'),
+    ('kitchen',        'furniture', 'Main Room', 1, '2e9pghUJbBqR4jTInsONQT'),
+    ('living_room',    'space', 'Main Room', 1, '0xY$LvXaDEswJDk_VU74C_'),
+    ('entry_hall',     'space', 'Main Room', 1, '18QhMtUIXBvQktPHXXxs7H');
 
--- 空调
-INSERT INTO asset (asset_name, asset_type, room, floor, bim_guid) VALUES
-    ('AC-001', 'ac', 'Main Server Room', 1, '7Ba6f$j9X3FU1n5'),
-    ('AC-002', 'ac', 'Main Server Room', 1, '8Cb7g$k0Y4GV2o6');
-
--- UPS
-INSERT INTO asset (asset_name, asset_type, room, floor, bim_guid) VALUES
-    ('UPS-001', 'ups', 'Main Server Room', 1, '9Dc8h$l1Z5HW3p7');
-
--- PDU
-INSERT INTO asset (asset_name, asset_type, room, floor, bim_guid, parent_id) VALUES
-    ('PDU-001', 'pdu', 'Main Server Room', 1, '0Ed9i$m2A6IX4q8', 1),
-    ('PDU-002', 'pdu', 'Main Server Room', 1, '1Fe0j$n3B7JY5r9', 2);
-
--- 传感器（RACK-001）
+-- 传感器（每个 asset 一个或多个传感器）
 INSERT INTO sensor (sensor_name, protocol, register, unit, asset_id) VALUES
-    ('RACK-001-TEMP', 'modbus', 100, '°C', 1),
-    ('RACK-001-HUM',  'modbus', 101, '%',  1),
-    ('RACK-001-PWR',  'modbus', 102, 'kW', 1);
-
-INSERT INTO sensor (sensor_name, protocol, register, unit, asset_id) VALUES
-    ('RACK-002-TEMP', 'modbus', 103, '°C', 2),
-    ('RACK-002-HUM',  'modbus', 104, '%',  2),
-    ('RACK-002-PWR',  'modbus', 105, 'kW', 2);
-
-INSERT INTO sensor (sensor_name, protocol, register, unit, asset_id) VALUES
-    ('RACK-003-TEMP', 'modbus', 106, '°C', 3),
-    ('RACK-003-HUM',  'modbus', 107, '%',  3),
-    ('RACK-003-PWR',  'modbus', 108, 'kW', 3);
-
-INSERT INTO sensor (sensor_name, protocol, register, unit, asset_id) VALUES
-    ('RACK-004-TEMP', 'modbus', 109, '°C', 4),
-    ('RACK-004-HUM',  'modbus', 110, '%',  4),
-    ('RACK-004-PWR',  'modbus', 111, 'kW', 4);
-
--- 空调传感器
-INSERT INTO sensor (sensor_name, protocol, register, unit, asset_id) VALUES
-    ('AC-001-TEMP', 'modbus', 200, '°C', 5),
-    ('AC-001-PWR',  'modbus', 201, 'kW', 5);
-
-INSERT INTO sensor (sensor_name, protocol, register, unit, asset_id) VALUES
-    ('AC-002-TEMP', 'modbus', 202, '°C', 6),
-    ('AC-002-PWR',  'modbus', 203, 'kW', 6);
-
--- UPS 传感器
-INSERT INTO sensor (sensor_name, protocol, register, unit, asset_id) VALUES
-    ('UPS-001-LOAD',  'modbus', 300, '%',  7),
-    ('UPS-001-VOLT',  'modbus', 301, 'V',  7);
+    ('FLOOR-TEMP',  'modbus', 100, '°C', 1),
+    ('FLOOR-HUM',   'modbus', 101, '%',  1),
+    ('WALL-RF-TEMP','modbus', 102, '°C', 2),
+    ('WALL-RF-HUM', 'modbus', 103, '%',  2),
+    ('WALL-RB-TEMP','modbus', 104, '°C', 3),
+    ('WALL-L-TEMP', 'modbus', 105, '°C', 4),
+    ('WALL-PL-TEMP','modbus', 106, '°C', 5),
+    ('WALL-PL-HUM', 'modbus', 107, '%',  5),
+    ('ROOF-L-TEMP', 'modbus', 108, '°C', 6),
+    ('ROOF-R-TEMP', 'modbus', 109, '°C', 7),
+    ('KITCHEN-TEMP','modbus', 110, '°C', 8),
+    ('KITCHEN-PWR', 'modbus', 111, 'kW', 8),
+    ('LIVING-TEMP', 'modbus', 112, '°C', 9),
+    ('LIVING-HUM',  'modbus', 113, '%',  9),
+    ('ENTRY-TEMP',  'modbus', 114, '°C', 10);
 
 -- 数据映射
 INSERT INTO mapping (sensor_id, measurement, mapping_type, factor, offset_val, unit) VALUES
     (1,  'temperature', 'direct', 1.0, 0.0, '°C'),
     (2,  'humidity',    'direct', 1.0, 0.0, '%'),
-    (3,  'power',       'direct', 0.1, 0.0, 'kW'),
-    (4,  'temperature', 'direct', 1.0, 0.0, '°C'),
-    (5,  'humidity',    'direct', 1.0, 0.0, '%'),
-    (6,  'power',       'direct', 0.1, 0.0, 'kW'),
+    (3,  'temperature', 'direct', 1.0, 0.0, '°C'),
+    (4,  'humidity',    'direct', 1.0, 0.0, '%'),
+    (5,  'temperature', 'direct', 1.0, 0.0, '°C'),
+    (6,  'temperature', 'direct', 1.0, 0.0, '°C'),
     (7,  'temperature', 'direct', 1.0, 0.0, '°C'),
     (8,  'humidity',    'direct', 1.0, 0.0, '%'),
-    (9,  'power',       'direct', 0.1, 0.0, 'kW'),
+    (9,  'temperature', 'direct', 1.0, 0.0, '°C'),
     (10, 'temperature', 'direct', 1.0, 0.0, '°C'),
-    (11, 'humidity',    'direct', 1.0, 0.0, '%'),
+    (11, 'temperature', 'direct', 1.0, 0.0, '°C'),
     (12, 'power',       'direct', 0.1, 0.0, 'kW'),
     (13, 'temperature', 'direct', 1.0, 0.0, '°C'),
-    (14, 'power',       'direct', 1.0, 0.0, 'kW'),
-    (15, 'temperature', 'direct', 1.0, 0.0, '°C'),
-    (16, 'power',       'direct', 1.0, 0.0, 'kW'),
-    (17, 'power',       'direct', 1.0, 0.0, '%'),
-    (18, 'power',       'direct', 1.0, 0.0, 'V');
+    (14, 'humidity',    'direct', 1.0, 0.0, '%'),
+    (15, 'temperature', 'direct', 1.0, 0.0, '°C');
 
 -- 告警规则
 INSERT INTO alarm_rule (sensor_id, alarm_name, condition, threshold, threshold_high, severity) VALUES
-    (1,  'RACK-001 Temp High',  'gt',  30.0, NULL, 'warning'),
-    (1,  'RACK-001 Temp Crit',  'gt',  35.0, NULL, 'critical'),
-    (11, 'RACK-003 Hum High',   'gt',  70.0, NULL, 'warning'),
-    (3,  'RACK-001 PWR High',   'gt',  5.0,  NULL, 'warning');
+    (1,  'Floor Temp High', 'gt', 30.0, NULL, 'warning'),
+    (5,  'Wall-RB Temp High','gt', 35.0, NULL, 'critical'),
+    (12, 'Kitchen PWR High', 'gt', 5.0,  NULL, 'warning');

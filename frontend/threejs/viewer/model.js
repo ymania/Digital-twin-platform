@@ -1,26 +1,79 @@
 /**
- * model.js — IFC 模型加载与 GUID 解析
+ * model.js — IFC 模型加载（JSON 转 Three.js Mesh）
  *
- * 当前阶段：无 IFC 模型文件，保留接口。
- * Phase 3 后期接入 web-ifc-three 或 IFC.js 后实现。
- *
- * 接口：
- *   loadIFC(url)       → 加载 IFC 模型，返回 Promise<{scene, guidMap}>
- *   getMeshByGuid(guid) → 通过 GUID 获取对应的 Three.js Mesh
+ * 用 Python 转换好的 ifc.json（本质是 IFC 几何体三角化结果）。
+ * 提供：loadIFC(scene, url) → 加到场景，返回 guidMap
  */
 
-export async function loadIFC(url) {
-  // TODO: Phase 3 后期接入 web-ifc-three
-  // const { IFCLoader } = await import('three/examples/jsm/loaders/IFCLoader.js');
-  // const loader = new IFCLoader();
-  // const scene = await loader.loadAsync(url);
-  // const guidMap = extractGUIDs(scene);
-  // return { scene, guidMap };
-  console.warn('model.js: IFC loading not yet implemented — using geometric placeholder');
-  return { scene: null, guidMap: new Map() };
+import * as THREE from 'three';
+
+const IFC_COLORS = {
+  'IfcWall':                 0xc8b89a,
+  'IfcSlab':                 0x8a9aa8,
+  'IfcRoof':                 0x6a5a4a,
+  'IfcSpace':                0x4a8a5c,
+  'IfcFurniture':            0x9a7a5a,
+  'IfcBuildingElementProxy': 0x6b8cae,
+  'IfcFurnishingElement':    0x9a7a5a,
+  'IfcSpatialZone':          0x4a8a5c,
+};
+
+export async function loadIFC(scene, url = './ifc.json') {
+  const resp = await fetch(url);
+  const data = await resp.json();
+
+  const guidMap = new Map();
+
+  // Compute scene center
+  let count = 0;
+  const center = new THREE.Vector3();
+  for (const m of data.meshes) {
+    for (let i = 0; i < m.vertices.length; i += 3) {
+      center.x += m.vertices[i];
+      center.y += m.vertices[i+1];
+      center.z += m.vertices[i+2];
+      count++;
+    }
+  }
+  if (count > 0) center.divideScalar(count);
+
+  for (const m of data.meshes) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(m.vertices), 3));
+    geo.setIndex(m.faces);
+    geo.computeVertexNormals();
+
+    const color = IFC_COLORS[m.type] || 0x4a6fa5;
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: 0.6, metalness: 0.2,
+      side: THREE.DoubleSide,
+    });
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(center.clone().negate());
+    mesh.userData.guid = m.guid;
+    mesh.userData.name = m.name;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    scene.add(mesh);
+    guidMap.set(m.guid, mesh);
+  }
+
+  console.log(`IFC loaded: ${data.meshes.length} meshes, ${guidMap.size} GUIDs`);
+  return guidMap;
 }
 
-export function getMeshByGuid(guid) {
-  // TODO: 从 guidMap 查找 Mesh
-  return null;
+export function setMeshColor(guidMap, guid, color) {
+  const mesh = guidMap.get(guid);
+  if (!mesh) return false;
+  mesh.material.color.setHex(color);
+  if (color !== 0x4ade80) {
+    mesh.material.emissive.setHex(color);
+    mesh.material.emissiveIntensity = 0.2;
+  } else {
+    mesh.material.emissive.setHex(0x000000);
+    mesh.material.emissiveIntensity = 0;
+  }
+  return true;
 }

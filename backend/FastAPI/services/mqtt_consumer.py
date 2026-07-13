@@ -69,16 +69,20 @@ async def handle_telemetry(topic: str, data: dict):
     timestamp = data.get("timestamp")
     edge_id = data.get("asset_id", "unknown")
 
-    for metric_name, value in metrics.items():
+    for status_key, current_status in statuses.items():
+        # status_key = "metric/asset_id" e.g. "temperature/floor"
+        parts = status_key.split("/", 1)
+        if len(parts) != 2:
+            continue
+        metric_name = parts[0]
+        value = metrics.get(metric_name)
         if value is None:
             continue
 
-        # 从 status 字典反推 asset_id (key = "metric/asset_id")
-        asset_id = edge_id
-        for key, st in statuses.items():
-            if key.startswith(metric_name + "/"):
-                asset_id = key.split("/", 1)[1]
-                break
+        asset_id = parts[1]  # from status_key split above
+
+        logger.info("PROCESSING: metric=%s asset=%s value=%.2f status=%s",
+                     metric_name, asset_id, float(value) if value else 0, current_status)
 
         logger.info("InfluxDB WRITE: bucket=%s measurement=%s asset_id=%s value=%.2f",
                      bucket, metric_name, asset_id, float(value))
@@ -106,17 +110,27 @@ async def handle_telemetry(topic: str, data: dict):
                          metric_name, asset_id, float(value), str(e))
 
         # ============================================================
-        # 状态机跳变 + WebSocket 增量推送（晚收官战契约）
+        # 状态机跳变 + WebSocket 增量推送
         # ============================================================
         from core.state import GLOBAL_TWIN_MATRIX, TwinState, derive_status
 
-        # 通过 metric+asset_id 组合生成伪 GUID（Phase 2 真正上线时由 PG 映射）
-        bim_guid = f"BIM_{asset_id}_{metric_name}"
+        # 查 PG 获取 IFC GUID（用第76行已提取的 asset_id）
+        bim_guid = ""
+        try:
+            from database import get_pool
+            pool = await get_pool()
+            row = await pool.fetchrow(
+                "SELECT bim_guid FROM asset WHERE asset_name = $1", asset_id
+            )
+            if row and row["bim_guid"]:
+                bim_guid = row["bim_guid"]
+        except Exception as e:
+            logger.warning("PG query failed for asset %s: %s", asset_id, e)
 
-        current_status = statuses.get(f"{metric_name}/{asset_id}", "Normal")
-        # 如果边缘层没传递状态，用 backend 自己的阈值判定
-        if current_status == "Normal":
-            current_status = derive_status(metric_name, float(value))
+        if not bim_guid:
+            bim_guid = f"BIM_{asset_id}_{metric_name}"
+
+        current_status = derive_status(metric_name, float(value))
 
         new_state = TwinState(
             guid=bim_guid,
