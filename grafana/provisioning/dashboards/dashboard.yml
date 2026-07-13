@@ -1,8 +1,0 @@
-apiVersion: 1
-
-providers:
-  - name: Digital Twin
-    folder: Digital Twin
-    type: file
-    options:
-      path: /etc/grafana/provisioning/dashboards
